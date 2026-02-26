@@ -1,8 +1,18 @@
+<p align="center">
+  <img src="util_images/photomesh_logo_.png" alt="PhotoMesh logo" width="220"/>
+</p>
+
 # PhotoMesh
 
 Texture mapping between camera frames and 3D meshes using COLMAP camera poses.
 
 **PhotoMesh** takes a bare mesh (`.ply`), a COLMAP dataset directory, and the corresponding images, then performs per-texel back-projection to produce a fully textured mesh (OBJ + texture atlas, PLY with vertex colours).
+
+<p align="center">
+  <img src="util_images/photomesh.png" alt="Before and after: Poisson mesh (left) and texture-mapped result (right)" width="560"/>
+  <br/>
+  <em>Left: bare Poisson reconstruction &nbsp;|&nbsp; Right: texture-mapped with PhotoMesh</em>
+</p>
 
 ## How It Works
 
@@ -11,19 +21,35 @@ The pipeline runs in four stages:
 1. **Mesh loading** — reads the `.ply` geometry (vertices + triangles).
 2. **Camera loading** — parses COLMAP `cameras.txt` / `images.txt` to get pinhole intrinsics and world-to-camera poses for every view.
 3. **UV unwrapping** — uses [xatlas](https://github.com/jpcy/xatlas) to pack the mesh into a square texture atlas with no overlapping UVs.
-4. **Back-projection** — for every texel in the atlas, finds the 3D surface point, projects it into all cameras, picks the best view (smallest positive depth = closest camera), and samples the colour bilinearly. Empty texels are filled by OpenCV inpainting.
+4. **Back-projection** — for every texel in the atlas, finds the 3D surface point, projects it into all cameras, and blends colours from all valid views weighted by viewing angle and depth (`cos(θ) / z`). Back-facing cameras are rejected using the face normal. Empty texels are filled by OpenCV inpainting.
 
 Optional steps: **colour matching** across views before projection, and **midpoint subdivision** to increase mesh resolution after UV unwrapping.
 
 ## Installation
 
+### 1. Clone the repository
+
 ```bash
 git clone https://github.com/photomesh/photomesh.git
 cd photomesh
+```
+
+### 2. Create and activate a conda environment
+
+```bash
+conda create -n photomesh python=3.11
+conda activate photomesh
+```
+
+> Python 3.9–3.12 are all supported. 3.11 is recommended for best compatibility with Open3D.
+
+### 3. Install PhotoMesh
+
+```bash
 pip install -e .
 ```
 
-For colour matching support, install the optional dependency:
+### 4. (Optional) Colour matching support
 
 ```bash
 pip install color-matcher
@@ -44,7 +70,7 @@ dataset/
 └── poisson.ply       # bare mesh to texture
 ```
 
-> Only the **PINHOLE** camera model is currently supported. If your COLMAP reconstruction used a different model, undistort the images first (`colmap image_undistorter`).
+> Supported COLMAP camera models: **PINHOLE**, **SIMPLE_PINHOLE**, **SIMPLE_RADIAL**, **RADIAL**, **OPENCV**, **FULL_OPENCV**. Radial distortion parameters are ignored (treated as pinhole). For best results with heavy distortion, undistort images first (`colmap image_undistorter`).
 
 If the images on disk have a different resolution than the one recorded in `cameras.txt` (e.g. you are using higher-resolution originals), PhotoMesh automatically rescales the intrinsics to match.
 
@@ -223,11 +249,12 @@ import numpy as np
 class MySelector(ViewSelector):
     def select(
         self,
-        pts3d: np.ndarray,    # (K, 3) 3D surface points
-        cam_R: np.ndarray,    # (N, 3, 3) world-to-camera rotations
-        cam_t: np.ndarray,    # (N, 3) world-to-camera translations
-        cam_intr: np.ndarray, # (N, 6) [fx, fy, cx, cy, W, H]
-        images: list,         # N loaded images as float32 (H, W, 3)
+        pts3d: np.ndarray,      # (K, 3) 3D surface points
+        cam_R: np.ndarray,      # (N, 3, 3) world-to-camera rotations
+        cam_t: np.ndarray,      # (N, 3) world-to-camera translations
+        cam_intr: np.ndarray,   # (N, 6) [fx, fy, cx, cy, W, H]
+        images: list,           # N loaded images as float32 (H, W, 3)
+        face_normal: np.ndarray,# (3,) unit normal of current triangle (world)
     ):
         # Return (best_colors, best_mask)
         # best_colors: (K, 3) float32 — sampled RGB per texel
@@ -240,7 +267,7 @@ result = photomesh.map_texture(
 )
 ```
 
-The built-in `ClosestZSelector` (string alias `"closest_z"`) picks the camera with the smallest positive depth for each texel, which generally produces the sharpest texture.
+The built-in `ClosestZSelector` (string alias `"closest_z"`) blends all valid cameras proportionally to `cos(θ) / z`, where `θ` is the angle between the face normal and the direction toward the camera, and `z` is the camera-space depth. Cameras that see the face from behind or at near-grazing angles (< 5°) are rejected. Soft blending eliminates hard seams at view boundaries while naturally down-weighting poor-angle cameras.
 
 ### Custom UV Parametrizer
 
