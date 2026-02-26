@@ -54,20 +54,21 @@ def parse_colmap_images(
     """
     images: List[Tuple[int, np.ndarray, np.ndarray, int, str]] = []
     with open(path) as f:
+        expect_image_line = True
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            parts = line.split()
-            # Skip POINTS2D lines (fewer than 10 tokens)
-            if len(parts) < 10:
-                continue
-            image_id = int(parts[0])
-            qvec = np.array([float(x) for x in parts[1:5]])
-            tvec = np.array([float(x) for x in parts[5:8]])
-            camera_id = int(parts[8])
-            name = parts[9]
-            images.append((image_id, qvec, tvec, camera_id, name))
+            if expect_image_line:
+                parts = line.split()
+                image_id = int(parts[0])
+                qvec = np.array([float(x) for x in parts[1:5]])
+                tvec = np.array([float(x) for x in parts[5:8]])
+                camera_id = int(parts[8])
+                name = parts[9]
+                images.append((image_id, qvec, tvec, camera_id, name))
+            # else: POINTS2D line — skip it
+            expect_image_line = not expect_image_line
     images.sort(key=lambda x: x[0])
     return images
 
@@ -107,16 +108,30 @@ def load_colmap_dataset(
 
     for i, (image_id, qvec, tvec, camera_id, name) in enumerate(images):
         model, width, height, params = cameras[camera_id]
-        if model != "PINHOLE":
+        if model == "PINHOLE":
+            fx, fy, cx, cy = params[:4]
+        elif model in ("SIMPLE_PINHOLE",):
+            f, cx, cy = params[:3]
+            fx = fy = f
+        elif model in ("SIMPLE_RADIAL", "SIMPLE_RADIAL_FISHEYE"):
+            # params: f, cx, cy, k  — treat as pinhole, ignore distortion
+            f, cx, cy = params[:3]
+            fx = fy = f
+        elif model in ("RADIAL", "RADIAL_FISHEYE"):
+            # params: f, cx, cy, k1, k2  — treat as pinhole, ignore distortion
+            f, cx, cy = params[:3]
+            fx = fy = f
+        elif model in ("OPENCV", "FULL_OPENCV"):
+            fx, fy, cx, cy = params[:4]
+        else:
             raise ValueError(
-                f"Only PINHOLE camera model is supported, got '{model}' "
-                f"for camera {camera_id}"
+                f"Unsupported camera model '{model}' for camera {camera_id}. "
+                f"Supported: PINHOLE, SIMPLE_PINHOLE, SIMPLE_RADIAL, RADIAL, OPENCV, FULL_OPENCV"
             )
-        fx, fy, cx, cy = params[:4]
 
         cam_R[i] = _qvec2rotmat(qvec)
         cam_t[i] = tvec
         cam_intr[i] = [fx, fy, cx, cy, width, height]
-        image_paths.append(os.path.join(dataset_dir, name))
+        image_paths.append(os.path.join(dataset_dir, "images", name))
 
     return cam_R, cam_t, cam_intr, image_paths

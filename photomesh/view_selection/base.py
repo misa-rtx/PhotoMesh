@@ -24,6 +24,7 @@ class ViewSelector(ABC):
         cam_t: np.ndarray,
         cam_intr: np.ndarray,
         images: List[np.ndarray],
+        face_normal: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Choose colours for a batch of 3-D points.
 
@@ -40,6 +41,8 @@ class ViewSelector(ABC):
             ``[fx, fy, cx, cy, W_orig, H_orig]``.
         images : list of np.ndarray
             ``N`` images, each ``(H, W, 3)`` float32 in ``[0, 255]``.
+        face_normal : np.ndarray
+            ``(3,)`` unit normal of the current triangle in world space.
 
         Returns
         -------

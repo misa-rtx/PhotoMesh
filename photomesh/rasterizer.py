@@ -117,9 +117,17 @@ def rasterize(
             + bary_u[:, None] * p3d_c
         )
 
+        # Face normal (outward direction undefined, but used for angle scoring)
+        edge1 = p3d_b - p3d_a
+        edge2 = p3d_c - p3d_a
+        face_normal = np.cross(edge1, edge2)
+        n_len = np.linalg.norm(face_normal)
+        if n_len > 1e-12:
+            face_normal /= n_len
+
         # Delegate colour selection to the ViewSelector
         best_colors, got_color = view_selector.select(
-            pts3d, cam_R, cam_t, cam_intr, images,
+            pts3d, cam_R, cam_t, cam_intr, images, face_normal,
         )
 
         # Write to atlas
