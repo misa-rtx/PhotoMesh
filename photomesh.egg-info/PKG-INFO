@@ -1,0 +1,196 @@
+Metadata-Version: 2.4
+Name: photomesh
+Version: 0.1.0
+Summary: Texture mapping between camera frames and 3D meshes using camera poses
+Author: PhotoMesh Contributors
+License: MIT
+Project-URL: Homepage, https://github.com/photomesh/photomesh
+Project-URL: Repository, https://github.com/photomesh/photomesh
+Keywords: 3d,texture,mesh,reconstruction,camera,uv-mapping
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Science/Research
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Scientific/Engineering :: Image Processing
+Classifier: Topic :: Multimedia :: Graphics :: 3D Modeling
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy
+Requires-Dist: open3d
+Requires-Dist: Pillow
+Requires-Dist: opencv-python-headless
+Requires-Dist: xatlas
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Dynamic: license-file
+
+# PhotoMesh
+
+Texture mapping between camera frames and 3D meshes using camera poses.
+
+**PhotoMesh** takes a bare mesh (`.ply`), camera parameters (`cameras.npz`), and a set of images, then performs per-texel back-projection to produce a fully textured mesh (OBJ + texture atlas, PLY with vertex colours).
+
+## Installation
+
+### Stable (recommended) — clone the repository
+
+```bash
+git clone https://github.com/photomesh/photomesh.git
+cd photomesh
+pip install -e .
+```
+
+### Via pip (when published)
+
+```bash
+pip install photomesh
+```
+
+## Quick Start
+
+### Same-scale images (images have the same resolution as the reconstruction model)
+
+```python
+import photomesh
+
+result = photomesh.map_texture(
+    mesh_path="poisson.ply",
+    cameras="cameras.npz",
+    images=["frames/1.png", "frames/2.png", "frames/3.png"],
+)
+
+# Save OBJ + MTL + texture + PLY to outputs/
+result.save("outputs/")
+
+# Access the Open3D mesh for post-processing
+mesh = result.get_open3d_mesh()
+```
+
+### Different scales (e.g. DUSt3R resized images to 512)
+
+When the 3D reconstruction model (e.g. DUSt3R) used resized images, you need to specify the original and resized dimensions:
+
+```python
+from photomesh import ImageSpec
+
+specs = [
+    ImageSpec("frames/1.png",  864, 880, 496, 512),
+    ImageSpec("frames/2.png",  822, 808, 512, 496),
+    ImageSpec("frames/3.png",  730, 764, 480, 512),
+]
+
+result = photomesh.map_texture(
+    mesh_path="poisson.ply",
+    cameras="cameras.npz",
+    images=[s.path for s in specs],
+    image_specs=specs,
+    texture_size=4096,
+)
+
+result.save("outputs/")
+```
+
+## API Reference
+
+### `photomesh.map_texture()`
+
+Main entry point. Full signature:
+
+```python
+photomesh.map_texture(
+    mesh_path: str,                         # Path to .ply mesh
+    cameras: str | CameraLoader,            # cameras.npz path or custom loader
+    images: list[str],                      # Ordered image file paths
+    image_specs: list[ImageSpec] | None,     # Scale info (None = same scale)
+    texture_size: int = 4096,               # Atlas resolution
+    uv_method: str | UVParametrizer = "xatlas",
+    view_selector: str | ViewSelector = "closest_z",
+    inpaint: bool = True,                   # Fill gaps in atlas
+    inpaint_radius: int = 3,
+    subdivide: int = 0,                     # Midpoint subdivision iterations
+    output_dir: str | None = None,          # Auto-save if set
+    verbose: bool = True,
+) -> TextureResult
+```
+
+### `TextureResult`
+
+Dataclass returned by `map_texture()`:
+
+| Attribute       | Type                       | Description                         |
+|-----------------|----------------------------|-------------------------------------|
+| `vertices`      | `np.ndarray (V, 3)`       | Vertex positions                    |
+| `triangles`     | `np.ndarray (F, 3)`       | Triangle indices                    |
+| `uvs`           | `np.ndarray (V, 2)`       | Normalised UV coordinates           |
+| `atlas`         | `np.ndarray (H, W, 3)`    | Texture atlas (uint8 RGB)           |
+| `mask`          | `np.ndarray (H, W)`       | Bool mask of filled texels          |
+| `texture_size`  | `int`                      | Atlas resolution                    |
+| `mesh`          | `o3d.geometry.TriangleMesh`| Open3D mesh with vertex colours     |
+
+Methods:
+- `result.save(output_dir, prefix, formats)` — export files
+- `result.get_open3d_mesh()` — return Open3D mesh
+
+### `ImageSpec`
+
+Named tuple: `(path, W_orig, H_orig, W_resized, H_resized)`
+
+## Extending PhotoMesh
+
+### Custom Camera Loader
+
+```python
+from photomesh import CameraLoader
+
+class MyLoader(CameraLoader):
+    def load(self, source):
+        # Return (poses, focals, shapes)
+        ...
+
+result = photomesh.map_texture(..., cameras=MyLoader().load("my_cameras.json"))
+```
+
+### Custom View Selector
+
+```python
+from photomesh import ViewSelector
+
+class MySelector(ViewSelector):
+    def select(self, pts3d, cam_R, cam_t, cam_intr, images):
+        # Return (best_colors, best_mask)
+        ...
+
+result = photomesh.map_texture(..., view_selector=MySelector())
+```
+
+### Custom UV Parametrizer
+
+```python
+from photomesh import UVParametrizer
+
+class MyUV(UVParametrizer):
+    def parametrize(self, vertices, triangles):
+        # Return (new_verts, new_indices, new_uvs, vmapping)
+        ...
+
+result = photomesh.map_texture(..., uv_method=MyUV())
+```
+
+## Dependencies
+
+- `numpy`
+- `open3d`
+- `Pillow`
+- `opencv-python-headless`
+- `xatlas`
+
+## License
+
+MIT

@@ -1,0 +1,9 @@
+numpy
+open3d
+Pillow
+opencv-python-headless
+xatlas
+
+[dev]
+pytest
+ruff
